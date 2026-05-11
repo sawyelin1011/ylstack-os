@@ -37,10 +37,44 @@ jobs:
           cat > ubuntu-rootfs/install_services.sh << 'SCRIPT'
           #!/bin/bash
           apt-get update
-          apt-get install -y openssh-server ttyd python3 python3-pip python3-venv python3-flask python3-flask-login python3-psutil python3-requests python3-rich sqlite3
+          apt-get install -y \
+            openssh-server \
+            ttyd \
+            python3 \
+            python3-pip \
+            python3-venv \
+            python3-flask \
+            python3-flask-login \
+            python3-psutil \
+            python3-requests \
+            python3-rich \
+            sqlite3 \
+            net-tools \
+            iproute2 \
+            curl \
+            wget \
+            git \
+            vim \
+            nano \
+            htop \
+            iotop \
+            sysstat \
+            lsof \
+            netcat-openbsd \
+            busybox
           apt-get clean
           rm -rf /var/lib/apt/lists/*
           rm -rf /root/.cache/pip
+          # Add Android network group permissions
+          groupadd -g 3003 aid_inet 2>/dev/null || true
+          groupadd -g 3004 aid_net_raw 2>/dev/null || true
+          groupadd -g 1003 aid_graphics 2>/dev/null || true
+          usermod -g 3003 -G 3003,3004 -a _apt 2>/dev/null || true
+          usermod -G 3003 -a root 2>/dev/null || true
+          # Create /run/sshd directory
+          mkdir -p /run/sshd
+          # Set root password
+          echo 'root:ylstackos' | chroot /rootfs /bin/chpasswd
           SCRIPT
           chmod +x ubuntu-rootfs/install_services.sh
           chroot ubuntu-rootfs /bin/bash /install_services.sh
