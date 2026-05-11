@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
       - name: Extract Ubuntu base
         run: |
           mkdir ubuntu-rootfs
-          tar -xzf ubuntu-base.tar.gz -C ubuntu-rootfs --numeric-owner
+          sudo tar -xzf ubuntu-base.tar.gz -C ubuntu-rootfs --numeric-owner
 
       - name: Install QEMU for ARM64 emulation
         run: |
@@ -29,64 +29,29 @@ jobs:
           sudo apt-get install -y qemu-user-static binfmt-support
           sudo update-binfmts --enable qemu-aarch64
 
-      - name: Copy QEMU to rootfs
+      - name: Setup rootfs for chroot
         run: |
           sudo cp /usr/bin/qemu-aarch64-static ubuntu-rootfs/usr/bin/
-
-      - name: Setup DNS in rootfs
-        run: |
           echo 'nameserver 1.1.1.1' | sudo tee ubuntu-rootfs/etc/resolv.conf
           echo 'nameserver 8.8.8.8' | sudo tee -a ubuntu-rootfs/etc/resolv.conf
 
       - name: Install preinstalled services
-        run: |
-          cat > /tmp/install_services.sh << 'SCRIPT'
-#!/bin/bash
-set -e
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y \
-  openssh-server \
-  ttyd \
-  python3 \
-  python3-pip \
-  python3-venv \
-  python3-flask \
-  python3-flask-login \
-  python3-psutil \
-  python3-requests \
-  python3-rich \
-  sqlite3 \
-  net-tools \
-  iproute2 \
-  curl \
-  wget \
-  git \
-  vim \
-  nano \
-  htop \
-  lsof \
-  netcat-openbsd \
-  busybox
-apt-get clean
-rm -rf /var/lib/apt/lists/*
-rm -rf /root/.cache/pip
-# Android network group permissions
-groupadd -g 3003 aid_inet 2>/dev/null || true
-groupadd -g 3004 aid_net_raw 2>/dev/null || true
-groupadd -g 1003 aid_graphics 2>/dev/null || true
-usermod -g 3003 -G 3003,3004 -a _apt 2>/dev/null || true
-usermod -G 3003 -a root 2>/dev/null || true
-# SSH setup
-mkdir -p /run/sshd
-echo 'root:ylstackos' | chpasswd
-sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config
-SCRIPT
-          sudo cp /tmp/install_services.sh ubuntu-rootfs/install_services.sh
-          sudo chmod +x ubuntu-rootfs/install_services.sh
-          sudo chroot ubuntu-rootfs /bin/bash /install_services.sh
-          sudo rm ubuntu-rootfs/install_services.sh
+        run: sudo chroot ubuntu-rootfs /bin/bash -c "
+          export DEBIAN_FRONTEND=noninteractive &&
+          apt-get update &&
+          apt-get install -y openssh-server ttyd python3 python3-pip python3-flask python3-flask-login python3-psutil python3-requests python3-rich sqlite3 net-tools iproute2 curl wget git vim nano htop lsof netcat-openbsd busybox &&
+          apt-get clean &&
+          rm -rf /var/lib/apt/lists/* /root/.cache/pip &&
+          groupadd -g 3003 aid_inet 2>/dev/null || true &&
+          groupadd -g 3004 aid_net_raw 2>/dev/null || true &&
+          groupadd -g 1003 aid_graphics 2>/dev/null || true &&
+          usermod -g 3003 -G 3003,3004 -a _apt 2>/dev/null || true &&
+          usermod -G 3003 -a root 2>/dev/null || true &&
+          mkdir -p /run/sshd &&
+          echo 'root:ylstackos' | chpasswd &&
+          sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config &&
+          sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config
+          "
 
       - name: Apply OS identity fixes
         run: |
@@ -104,26 +69,19 @@ SCRIPT
           printf '// Node.js networkInterfaces stub for Android\nconst os = require("os");\nos.networkInterfaces = () => ({ lo: [{ address: "127.0.0.1", netmask: "255.0.0.0", family: "IPv4" }] });\n' | sudo tee ubuntu-rootfs/root/hijack.js
 
       - name: Copy dashboard
-        run: |
-          sudo cp -r dashboard ubuntu-rootfs/ylstackos
+        run: sudo cp -r dashboard ubuntu-rootfs/ylstackos
 
-      - name: Update VERSION file
+      - name: Update VERSION and sysconf
         run: |
-          printf '{\n  "version": "4.0.0",\n  "name": "YL StackOS — Andronix Edition",\n  "build_date": "%s",\n  "paths": {\n    "root": "/ylstackos/",\n    "logs": "/ylstackos/logs/",\n    "static": "/ylstackos/static/dist/"\n  }\n}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | sudo tee ubuntu-rootfs/ylstackos/VERSION
-
-      - name: Update sysconf.py
-        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf '{\n  "version": "4.0.0",\n  "name": "YL StackOS — Andronix Edition",\n  "build_date": "%s"\n}\n' "$BUILD_DATE" | sudo tee ubuntu-rootfs/ylstackos/VERSION
           sudo sed -i 's/os_ver = "3.2"/os_ver = "4.0"/g' ubuntu-rootfs/ylstackos/sysconf.py
           sudo sed -i 's/os_build_channel = "3200"/os_build_channel = "4000"/g' ubuntu-rootfs/ylstackos/sysconf.py
 
       - name: Package rootfs
         run: |
-          sudo tar --exclude=proc --exclude=sys --exclude=dev --exclude=run --exclude=tmp -czf ylstackos-rootfs-4.0-aarch64.tar.gz ubuntu-rootfs/
-
-      - name: Generate SHA256
-        run: |
-          sha256sum ylstackos-rootfs-4.0-aarch64.tar.gz > ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
-          cat ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
+          sudo tar --exclude=ubuntu-rootfs/proc --exclude=ubuntu-rootfs/sys --exclude=ubuntu-rootfs/dev --exclude=ubuntu-rootfs/run --exclude=ubuntu-rootfs/tmp -czf ylstackos-rootfs-4.0-aarch64.tar.gz ubuntu-rootfs/
+          sha256sum ylstackos-rootfs-4.0-aarch64.tar.gz | tee ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -133,9 +91,8 @@ SCRIPT
             ylstackos-rootfs-4.0-aarch64.tar.gz
             ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
 
-      - name: Release
-        uses: softprops/action-gh-release@v1gh
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
           files: |
             ylstackos-rootfs-4.0-aarch64.tar.gz
