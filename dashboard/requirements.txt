@@ -1,0 +1,13 @@
+# YL StackOS Dashboard — Python dependencies
+# Install: pip install -r requirements.txt
+
+flask>=3.0.0
+flask-login>=0.6.3
+flask-babel>=4.0.0
+flask-cors>=4.0.0
+werkzeug>=3.0.0
+gunicorn>=22.0.0
+psutil>=6.0.0
+requests>=2.32.0
+rich>=13.0.0
+# netifaces intentionally excluded — replaced by psutil (see app/utils/network.py)
