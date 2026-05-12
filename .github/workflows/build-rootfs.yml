@@ -3,7 +3,7 @@ name: Build YL StackOS Rootfs
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build:
@@ -26,7 +26,7 @@ jobs:
       - name: Install QEMU for ARM64 emulation
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo apt-get install -y qemu-user-static binfmt-support curl
           sudo update-binfmts --enable qemu-aarch64
 
       - name: Setup rootfs for chroot
@@ -46,6 +46,7 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive &&
             apt-get update &&
             apt-get install -y openssh-server ttyd python3 python3-pip python3-flask python3-flask-login python3-psutil python3-requests python3-rich sqlite3 net-tools iproute2 curl wget git vim nano htop lsof netcat-openbsd busybox &&
+            pip3 install --no-cache-dir websockify &&
             apt-get clean &&
             rm -rf /var/lib/apt/lists/* /root/.cache/pip &&
             groupadd -g 3003 aid_inet 2>/dev/null || true &&
@@ -59,6 +60,16 @@ jobs:
             sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config
           "
 
+      - name: Setup noVNC
+        run: |
+          sudo mkdir -p ubuntu-rootfs/ylstackos/utils/novnc
+          curl -L -o /tmp/novnc.tar.gz https://github.com/novnc/noVNC/archive/refs/tags/v1.4.0.tar.gz
+          ls -la /tmp/novnc.tar.gz
+          sudo tar -xzf /tmp/novnc.tar.gz --strip-components=1 -C ubuntu-rootfs/ylstackos/utils/novnc
+          sudo rm /tmp/novnc.tar.gz
+          sudo chmod +x ubuntu-rootfs/ylstackos/utils/novnc/utils/novnc_proxy
+          ls -la ubuntu-rootfs/ylstackos/utils/novnc/
+
       - name: Unmount virtual filesystems
         if: always()
         run: |
@@ -71,7 +82,7 @@ jobs:
         run: |
           echo "ylstackos" | sudo tee ubuntu-rootfs/etc/hostname
           echo "YL StackOS — Andronix Edition" | sudo tee ubuntu-rootfs/etc/motd
-          printf 'YL StackOS — Andronix Edition \\n \\l\nRunning on Android (rooted) · Ubuntu 22.04.5 LTS aarch64\n' | sudo tee ubuntu-rootfs/etc/issue
+          printf 'YL StackOS — Andronix Edition \n \\l\nRunning on Android (rooted) · Ubuntu 22.04.5 LTS aarch64\n' | sudo tee ubuntu-rootfs/etc/issue
           echo "ylstackos" | sudo tee ubuntu-rootfs/etc/debian_chroot
           printf 'LANG=C.UTF-8\nLC_ALL=C.UTF-8\n' | sudo tee ubuntu-rootfs/etc/default/locale
           sudo sed -i 's|python3 /flyos/motd/motd.py|python3 /ylstackos/motd/motd.py|g' ubuntu-rootfs/etc/bash.bashrc
@@ -92,24 +103,36 @@ jobs:
           sudo sed -i 's/os_ver = "3.2"/os_ver = "4.0"/g' ubuntu-rootfs/ylstackos/sysconf.py
           sudo sed -i 's/os_build_channel = "3200"/os_build_channel = "4000"/g' ubuntu-rootfs/ylstackos/sysconf.py
 
+      - name: Verify preinstalled services
+        run: |
+          echo "=== Verifying preinstalled services ==="
+          test -f ubuntu-rootfs/usr/sbin/sshd && echo "✅ sshd present" || echo "❌ sshd MISSING"
+          test -f ubuntu-rootfs/usr/bin/ttyd && echo "✅ ttyd present" || echo "❌ ttyd MISSING"
+          test -d ubuntu-rootfs/ylstackos/utils/novnc && echo "✅ noVNC present" || echo "❌ noVNC MISSING"
+          test -f ubuntu-rootfs/ylstackos/main_ylstack.py && echo "✅ dashboard present" || echo "❌ dashboard MISSING"
+          test -f ubuntu-rootfs/root/hijack.js && echo "✅ hijack.js present" || echo "❌ hijack.js MISSING"
+          python3 -c "import websockify" && echo "✅ websockify available" || echo "❌ websockify MISSING"
+          echo "=== Verification complete ==="
+
       - name: Package rootfs
         run: |
-          sudo tar --exclude=ubuntu-rootfs/proc --exclude=ubuntu-rootfs/sys --exclude=ubuntu-rootfs/dev --exclude=ubuntu-rootfs/run --exclude=ubuntu-rootfs/tmp -czf ylstackos-rootfs-4.0-aarch64.tar.gz ubuntu-rootfs/
-          sha256sum ylstackos-rootfs-4.0-aarch64.tar.gz | tee ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
+          # Package contents directly (no subdirectory) so tar -C /data/local/ylstackos/rootfs/ works correctly
+          sudo tar --exclude=proc --exclude=sys --exclude=dev --exclude=run --exclude=tmp -czf ylstackos-rootfs-4.0.6-aarch64.tar.gz -C ubuntu-rootfs .
+          sha256sum ylstackos-rootfs-4.0.6-aarch64.tar.gz | tee ylstackos-rootfs-4.0.6-aarch64.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: rootfs
           path: |
-            ylstackos-rootfs-4.0-aarch64.tar.gz
-            ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
+            ylstackos-rootfs-4.0.6-aarch64.tar.gz
+            ylstackos-rootfs-4.0.6-aarch64.tar.gz.sha256
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ylstackos-rootfs-4.0-aarch64.tar.gz
-            ylstackos-rootfs-4.0-aarch64.tar.gz.sha256
+            ylstackos-rootfs-4.0.6-aarch64.tar.gz
+            ylstackos-rootfs-4.0.6-aarch64.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
